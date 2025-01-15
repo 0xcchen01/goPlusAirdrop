@@ -5,6 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Goplus Airdrop Checker</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/uuid/8.3.2/uuid.min.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
 </head>
 <body class="bg-gradient-to-br from-indigo-100 to-purple-100 min-h-screen p-4 md:p-8">
@@ -43,7 +45,7 @@
                             <input
                                 type="number"
                                 id="delay"
-                                value="500"
+                                value="1000"
                                 min="100"
                                 class="w-20 ml-2 p-1 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
                             >
@@ -116,9 +118,67 @@
             document.getElementById('progress').classList.add('hidden');
         }
 
+        // 生成数据字符串
+        function generateDataString(url, requestBody) {
+            let urlWithoutQuery = url.replace("?", "");
+            if (["post", "put"].includes(requestBody.method)) {
+                const baseUrl = url.split("?")[0];
+                const body = requestBody.body;
+
+                if (body instanceof FormData) {
+                    const formDataEntries = Array.from(body.entries()).map(([key, value]) => `${key}=${value}`).join(",");
+                    urlWithoutQuery = `${baseUrl}{${formDataEntries}}`;
+                } else {
+                    urlWithoutQuery = `${baseUrl}${body}`;
+                }
+            }
+            return urlWithoutQuery;
+        }
+
+        // 生成 OKX 验证头
+        function generateOkxHeaders(url, requestBody) {
+            const OkVerifyToken = uuid.v4();
+            const currentTimestamp = Date.now();
+            let derivedKey = '';
+            const hashValue = CryptoJS.SHA256(OkVerifyToken).toString();
+            const currentTime = Math.floor(currentTimestamp / 1e3);
+            const intervalMod32 = Math.floor(currentTime / 600 % 32);
+            const hourMod32 = Math.floor(currentTime / 3600 % 32);
+
+            for (let i = 0; i < 32; i++) {
+                const char = hashValue[(intervalMod32 + (hourMod32 + i) * i) % 32];
+                derivedKey += char;
+            }
+
+            const dataString = generateDataString(url, requestBody);
+            const hmacSignature = CryptoJS.HmacSHA256(dataString, derivedKey);
+            const OkVerifySign = CryptoJS.enc.Base64.stringify(hmacSignature);
+
+            return {
+                'Ok-Verify-Token': OkVerifyToken,
+                'Ok-Timestamp': currentTimestamp,
+                'Ok-Verify-Sign': OkVerifySign
+            };
+        }
+
         async function checkSingleAddress(address) {
             try {
-                const response = await fetch(`https://www.okx.com/priapi/v2/wallet/airdrop/goplus/info?address=${address}`);
+                const url = `/priapi/v2/wallet/airdrop/goplus/info?address=${address}`;
+                const headers = generateOkxHeaders(url, { method: 'get' });
+
+                const response = await fetch(`https://www.okx.com${url}`, {
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': '*/*, application/json',
+                        'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8',
+                        'app-type': 'web',
+                        'origin': 'https://okx.com',
+                        'Ok-Verify-Token': headers['Ok-Verify-Token'],
+                        'Ok-Timestamp': headers['Ok-Timestamp'].toString(),
+                        'Ok-Verify-Sign': headers['Ok-Verify-Sign']
+                    }
+                });
+
                 if (!response.ok) {
                     throw new Error('API 请求失败');
                 }
@@ -140,7 +200,7 @@
         async function checkAirdrops() {
             const addressesText = document.getElementById('addresses').value;
             const addresses = addressesText.split('\n').filter(addr => addr.trim());
-            const delay = parseInt(document.getElementById('delay').value) || 500;
+            const delay = parseInt(document.getElementById('delay').value) || 1000;
             let totalAmount = 0;
 
             if (addresses.length === 0) {
@@ -153,12 +213,10 @@
             const progressBar = document.getElementById('progress-bar');
             const progressText = document.getElementById('progress-text');
 
-            // 初始化进度条
             progressDiv.classList.remove('hidden');
             progressBar.style.width = '0%';
             progressText.textContent = `0/${addresses.length}`;
 
-            // 初始化结果表格
             resultsDiv.innerHTML = `
                 <div class="overflow-x-auto rounded-lg border border-gray-200">
                     <table class="min-w-full divide-y divide-gray-200">
@@ -184,7 +242,6 @@
 
                 const result = await checkSingleAddress(address);
 
-                // 更新结果表格
                 const row = document.createElement('tr');
                 const statusIcon = result.success
                     ? '<i class="fas fa-check-circle text-green-500"></i>'
@@ -206,12 +263,10 @@
                 `;
                 resultsBody.appendChild(row);
 
-                // 更新进度
                 const progress = ((i + 1) / addresses.length * 100).toFixed(0);
                 progressBar.style.width = `${progress}%`;
                 progressText.textContent = `${i + 1}/${addresses.length}`;
 
-                // 累加有效的空投数量
                 if (result.success && !isNaN(parseFloat(result.tokenAmount))) {
                     totalAmount += parseFloat(result.tokenAmount);
                 }
@@ -221,7 +276,6 @@
                 }
             }
 
-            // 添加总计行
             resultsDiv.insertAdjacentHTML('beforeend', `
                 <div class="mt-4 p-4 bg-indigo-50 rounded-lg border border-indigo-200">
                     <div class="flex justify-between items-center">
