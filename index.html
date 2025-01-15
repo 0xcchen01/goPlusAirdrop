@@ -88,7 +88,7 @@
             </div>
         </div>
 
-<!-- Footer -->
+        <!-- Footer -->
         <div class="mt-4 text-center text-sm text-gray-600">
             <p class="mb-2">请合理使用工具，避免频繁查询</p>
             <div class="flex justify-center space-x-4">
@@ -141,6 +141,7 @@
             const addressesText = document.getElementById('addresses').value;
             const addresses = addressesText.split('\n').filter(addr => addr.trim());
             const delay = parseInt(document.getElementById('delay').value) || 500;
+            let totalAmount = 0;
 
             if (addresses.length === 0) {
                 alert('请输入至少一个钱包地址');
@@ -210,11 +211,25 @@
                 progressBar.style.width = `${progress}%`;
                 progressText.textContent = `${i + 1}/${addresses.length}`;
 
-                // 添加延迟
+                // 累加有效的空投数量
+                if (result.success && !isNaN(parseFloat(result.tokenAmount))) {
+                    totalAmount += parseFloat(result.tokenAmount);
+                }
+
                 if (i < addresses.length - 1) {
                     await sleep(delay);
                 }
             }
+
+            // 添加总计行
+            resultsDiv.insertAdjacentHTML('beforeend', `
+                <div class="mt-4 p-4 bg-indigo-50 rounded-lg border border-indigo-200">
+                    <div class="flex justify-between items-center">
+                        <span class="text-sm font-medium text-gray-700">总空投数量:</span>
+                        <span class="text-lg font-semibold text-indigo-600">${totalAmount.toLocaleString()}</span>
+                    </div>
+                </div>
+            `);
         }
     </script>
 </body>
